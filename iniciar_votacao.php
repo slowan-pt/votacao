@@ -8,8 +8,9 @@ $isDesempate = isset($_GET['desempate']);
 if ($isDesempate) {
     // MODO DESEMPATE (acionado por "Continuar Desempate")
     
-    // CORREÇÃO: Define status_votacao=3 E ZERA os votos e contagens (votos_lider_json e votos_contagem)
-    $stmt = $conn->prepare("UPDATE departamentos SET status_votacao=3, votos_lider_json='[]', votos_contagem='{}' WHERE id=?");
+    // Define status_votacao=3 e ZERA APENAS a nova coluna de votos de desempate.
+    // Preserva votos_lider_json para auditoria.
+    $stmt = $conn->prepare("UPDATE departamentos SET status_votacao=3, votos_desempate_json='[]', votos_contagem='{}' WHERE id=?");
     $stmt->bind_param("i", $dep_id);
     $stmt->execute();
 
@@ -19,14 +20,21 @@ if ($isDesempate) {
 } else {
     // MODO VOTAÇÃO INICIAL (acionado por "Iniciar votação")
     
-    // Define status_votacao=1 (Indicação)
-    $stmt = $conn->prepare("UPDATE departamentos SET status_votacao=1 WHERE id=?");
+    // Define status_votacao=1 (Indicação) e limpa todos os campos de votação anteriores
+    $stmt = $conn->prepare("UPDATE departamentos 
+                            SET 
+                                status_votacao=1, 
+                                indicados='[]', 
+                                votos_json='[]', 
+                                votos_lider_json='[]', 
+                                votos_contagem='{}', 
+                                votos_desempate_json='[]', 
+                                candidatos_desempate_json=NULL 
+                            WHERE id=?");
     $stmt->bind_param("i", $dep_id);
     $stmt->execute();
 
     // Redireciona para a tela de indicação
-    header("Location: votacao.php?id=$dep_id"); 
+    header("Location: votacao.php?id=$dep_id");
 }
-
 exit;
-?>

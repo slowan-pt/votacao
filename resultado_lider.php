@@ -6,7 +6,7 @@ $conn = new mysqli("localhost","root","","votacao");
 if($conn->connect_error) die("Erro: ".$conn->connect_error);
 
 $dep_id = intval($_GET['id'] ?? 0);
-$stmt = $conn->prepare("SELECT * FROM departamentos WHERE id=?");
+$stmt = $conn->prepare("SELECT * FROM departamentos WHERE id=? ");
 $stmt->bind_param("i",$dep_id);
 $stmt->execute();
 $departamento = $stmt->get_result()->fetch_assoc();
@@ -15,90 +15,57 @@ if(!$departamento) die("Departamento não encontrado.");
 $isAdmin = ($_SESSION['usuario_tipo'] ?? '') === 'admin';
 
 // REDIRECIONAMENTO AUTOMÁTICO PARA USUÁRIOS COMUNS APÓS AÇÃO DO ADMIN
-// Se o status for 0 e ainda não tiver líder, significa que a votação foi pausada (desempate depois) ou não iniciada.
 if ($departamento['status_votacao'] == 0 && empty($departamento['lider_escolhido_2026'])) {
     if (!$isAdmin) {
         header("Location: departamentos.php"); exit;
     }
 }
 
-
-$candidatos_ids = json_decode($departamento['indicados'],true)??[];
-// Se for desempate, usa a lista de candidatos de desempate
-if ($departamento['status_votacao'] == 3) {
-    $candidatos_ids = json_decode($departamento['candidatos_desempate_json'], true) ?? [];
-}
-
-$votos_lider = json_decode($departamento['votos_lider_json']??'[]',true)??[];
-$votos_contagem = json_decode($departamento['votos_contagem']??'{}',true)??[];
-
-$indicados = [];
-if(count($candidatos_ids)>0){
-    $ids_str = implode(',',$candidatos_ids);
-    // ATENÇÃO: Risco de SQL Injection potencial na query $res. Prepared statement seria melhor.
-    $res = $conn->query("SELECT id,nome FROM usuarios WHERE id IN ($ids_str) ORDER BY nome");
-    while($row = $res->fetch_assoc()){
-        $id = $row['id'];
-        $quem_votou = array_map(function($v) use ($id){ return $v['votou_em']==$id?$v['usuario_id']:null; }, $votos_lider);
-        $indicados[$id] = [
-            "nome"=>htmlspecialchars($row['nome']),
-            "votos"=>$votos_contagem[$id] ?? 0,
-            "quem_votou"=>array_filter($quem_votou)
-        ];
-    }
-}
-
-// --- Lógica de Detecção de Empate ---
-$lider_id = null; 
-$max_votos = -1;
-$empatados = [];
-
-// Encontra o máximo de votos
-foreach ($indicados as $id => $info) {
-    if ($info['votos'] > $max_votos) {
-        $max_votos = $info['votos'];
-        $lider_id = $id;
-    }
-}
-
-// Identifica todos os empatados
-foreach ($indicados as $id => $info) {
-    if ($info['votos'] == $max_votos && $max_votos > 0) {
-        $empatados[] = $id;
-    }
-}
-$isEmpate = count($empatados) > 1;
-
-// --- Lógica de Ação do Admin ---
+// Apenas o Admin pode enviar POST para finalizar/desempate
 if ($isAdmin) {
+    // --- Lógica de Ação do Admin ---
+    
+    // 1. Finalizar Votação (Vencedor único)
     if (isset($_POST['finalizar'])) {
-        if($isEmpate) die("Erro: Não é possível finalizar com empate.");
-        
-        // Ação: Finalizar Votação (Sem Empate)
-        $stmt = $conn->prepare("UPDATE departamentos SET lider_escolhido_2026=?, status_votacao=0, candidatos_desempate_json=NULL WHERE id=?");
-        $stmt->bind_param("ii", $lider_id, $dep_id);
-        $stmt->execute();
+        $lider_id = intval($_POST['lider_id_vencedor'] ?? 0);
+        if($lider_id > 0){
+            // Finaliza o departamento, define o líder e zera o status
+            $stmt = $conn->prepare("UPDATE departamentos SET lider_escolhido_2026=?, status_votacao=0 WHERE id=?");
+            $stmt->bind_param("ii",$lider_id,$dep_id);
+            $stmt->execute();
+        }
         header("Location: departamentos.php"); exit;
-    } elseif (isset($_POST['desempate_agora']) && $isEmpate) {
-        // Ação: Iniciar Votação de Desempate Imediata
-        $empatados_json = json_encode($empatados);
+    } 
+    
+    // 2. Votação de Desempate (Iniciar Desempate Imediato)
+    elseif (isset($_POST['desempate_agora'])) {
+        $empatados_json = $_POST['empatados_json'] ?? '[]';
         
-        // Limpa votos anteriores, armazena candidatos do desempate e define status_votacao=3
-        $stmt = $conn->prepare("UPDATE departamentos SET candidatos_desempate_json=?, votos_lider_json='[]', votos_contagem='{}', status_votacao=3 WHERE id=?");
+        // Define os candidatos para o desempate e inicia a votação (status=3), limpando os votos ATUAIS
+        $stmt = $conn->prepare("UPDATE departamentos 
+                                SET candidatos_desempate_json=?, 
+                                status_votacao=3, 
+                                votos_desempate_json='[]',
+                                votos_contagem='{}'
+                                WHERE id=?");
         $stmt->bind_param("si", $empatados_json, $dep_id);
         $stmt->execute();
 
         header("Location: votacao_lider.php?id=$dep_id"); exit;
-    } elseif (isset($_POST['desempate_depois']) && $isEmpate) {
-        // Ação: Salvar Empate para depois
-        $empatados_json = json_encode($empatados);
+    }
+    
+    // 3. Fazer Desempate Depois (Pausar)
+    elseif (isset($_POST['desempate_depois'])) {
+        $empatados_json = $_POST['empatados_json'] ?? '[]';
         
-        // Armazena candidatos do desempate e DESATIVA a votação (status_votacao=0)
-        $stmt = $conn->prepare("UPDATE departamentos SET candidatos_desempate_json=?, status_votacao=0 WHERE id=?");
+        // Salva os candidatos para o desempate e define status=0 (Pausa)
+        $stmt = $conn->prepare("UPDATE departamentos 
+                                SET candidatos_desempate_json=?, 
+                                status_votacao=0 
+                                WHERE id=?");
         $stmt->bind_param("si", $empatados_json, $dep_id);
         $stmt->execute();
-
-        // REDIRECIONA ADMIN PARA DEPARTAMENTOS
+        
         header("Location: departamentos.php"); exit;
     }
 }
@@ -109,63 +76,99 @@ if ($isAdmin) {
 <meta charset="UTF-8">
 <title>Resultado da Votação</title>
 <style>
-body{font-family:Arial; max-width:700px; margin:30px auto; text-align:center;}
-h2{margin-bottom: 20px;}
-p{margin-bottom: 30px;}
-table{width:100%; border-collapse:collapse; margin-top:20px; text-align:left;}
-th,td{border:1px solid #ccc; padding:10px; text-align:left;}
-th{background:#f0f0f0; font-weight:bold;}
-button{padding:8px 12px; margin:10px; cursor:pointer;}
+    body{font-family:Arial; max-width:800px; margin:30px auto; text-align:center;}
+    table{width:100%; border-collapse:collapse; margin-top:20px;}
+    th, td{border:1px solid #ccc; padding:10px; text-align:left;}
+    th{background-color:#f2f2f2;}
+    .spinner{border:4px solid #f3f3f3; border-top:4px solid #3498db; border-radius:50%; width:30px; height:30px; animation: spin 1s linear infinite; margin:10px auto;}
+    @keyframes spin { 0%{transform:rotate(0deg);} 100%{transform:rotate(360deg);} }
+    #acoesAdmin button{margin:5px; padding:10px 15px;}
 </style>
 </head>
 <body>
-<h2>Resultado da votação - <?php echo htmlspecialchars($departamento['nome']); ?></h2>
+<h2>Resultado da Votação - <?php echo htmlspecialchars($departamento['nome']); ?></h2>
 <p>Bem-vindo, <?php echo htmlspecialchars($_SESSION['usuario_nome']); ?> | <a href="departamentos.php">Voltar</a></p>
 
-<?php 
-if(count($indicados)==0){ 
-    echo "<p>Nenhum candidato.</p>"; 
-    exit; 
-} 
-?>
-
 <table>
-<tr><th>Candidato</th><th>Votos Recebidos</th><th>Quem votou</th></tr>
-<?php 
-foreach($indicados as $id=>$info): 
-    $is_leader = ($id == $lider_id && !$isEmpate) ? 'style="background-color: #e6ffe6; font-weight: bold;"' : '';
-    $is_tied = (in_array($id, $empatados) && $isEmpate) ? 'style="background-color: #fffacd; font-weight: bold;"' : $is_leader;
-?>
-<tr <?php echo $is_tied; ?>>
-<td><?php echo $info['nome']; ?></td>
-<td><?php echo $info['votos']; ?></td>
-<td>
-<?php 
-$nomes_votantes = [];
-foreach($info['quem_votou'] as $uid){
-    // ATENÇÃO: Risco de SQL Injection aqui, o ID não está sendo sanitizado/preparado antes da query
-    $res = $conn->query("SELECT nome FROM usuarios WHERE id=$uid");
-    // Garante que o nome seja sanitizado ao exibir
-    if($row = $res->fetch_assoc()) $nomes_votantes[] = htmlspecialchars($row['nome']);
-}
-echo implode(", ",$nomes_votantes);
-?>
-</td>
-</tr>
-<?php endforeach; ?>
+    <thead>
+        <tr>
+            <th>Candidato</th>
+            <th>Votos Recebidos</th>
+            <th>Quem votou</th>
+        </tr>
+    </thead>
+    <tbody id="tabelaResultado">
+        <tr><td colspan="3"><div class="spinner"></div> Carregando resultados...</td></tr>
+    </tbody>
 </table>
 
-<?php if ($isAdmin): ?>
-    <form method="POST">
-        <?php if ($isEmpate): ?>
-            <h3>Resultado: Empate!</h3>
-            <button type="submit" name="desempate_agora">Votação de Desempate</button>
-            <button type="submit" name="desempate_depois">Fazer desempate depois</button>
-        <?php else: ?>
-            <button type="submit" name="finalizar">Finalizar Votação</button>
-        <?php endif; ?>
-    </form>
-<?php endif; ?>
+<div id="acoesAdmin">
+    <?php if(!$isAdmin): ?>
+        <p>Aguardando o administrador finalizar a rodada.</p>
+    <?php endif; ?>
+</div>
 
+<script>
+    const depId = <?php echo $dep_id; ?>;
+    const isAdmin = <?php echo $isAdmin ? 'true' : 'false'; ?>;
+    const tabelaBody = document.getElementById('tabelaResultado');
+    const acoesAdminDiv = document.getElementById('acoesAdmin');
+
+    function buscarResultados() {
+        fetch(`resultado_lider_json.php?id=${depId}`)
+            .then(response => {
+                if (!response.ok) throw new Error('Network response was not ok');
+                return response.json();
+            })
+            .then(data => {
+                if (data.erro) {
+                    tabelaBody.innerHTML = `<tr><td colspan="3">Erro: ${data.erro}</td></tr>`;
+                    return;
+                }
+                
+                // 1. Limpar tabela e popular
+                tabelaBody.innerHTML = '';
+                data.indicados.forEach(info => {
+                    const row = tabelaBody.insertRow();
+                    row.innerHTML = `
+                        <td>${info.nome}</td>
+                        <td>${info.votos}</td>
+                        <td>${info.quem_votou_nomes}</td>
+                    `;
+                });
+
+                // 2. Gerar título e botões de ação (Apenas para Admin)
+                if (isAdmin) {
+                    let htmlBotoes = '<form method="POST">';
+
+                    if (data.isEmpate) {
+                        htmlBotoes += '<h3>Resultado: Empate!</h3>';
+                        // Adicionar candidatos empatados para envio no POST
+                        htmlBotoes += `<input type="hidden" name="empatados_json" value='${JSON.stringify(data.empatados)}'>`;
+                        htmlBotoes += '<button type="submit" name="desempate_agora">Votação de Desempate</button>';
+                        htmlBotoes += '<button type="submit" name="desempate_depois">Fazer desempate depois</button>';
+                    } else if (data.lider_id) {
+                        htmlBotoes += `<h3>Líder Vencedor: ${data.indicados.find(i => i.id === data.lider_id).nome}</h3>`;
+                        htmlBotoes += `<input type="hidden" name="lider_id_vencedor" value="${data.lider_id}">`;
+                        htmlBotoes += '<button type="submit" name="finalizar">Finalizar Votação</button>';
+                    }
+
+                    htmlBotoes += '</form>';
+                    acoesAdminDiv.innerHTML = htmlBotoes;
+                } else if (!isAdmin && data.isEmpate) {
+                    // Mensagem para o usuário comum em caso de empate
+                    acoesAdminDiv.innerHTML = '<p>Houve um empate. Aguarde o administrador iniciar a votação de desempate.</p>';
+                }
+            })
+            .catch(error => {
+                console.error('Erro ao buscar resultados:', error);
+                tabelaBody.innerHTML = `<tr><td colspan="3">Erro ao carregar resultados. Tentando novamente...</td></tr>`;
+            });
+    }
+
+    // Inicia a atualização e configura para repetir a cada 2s para acompanhar a votação/ação do admin
+    buscarResultados();
+    setInterval(buscarResultados, 2000);
+</script>
 </body>
 </html>

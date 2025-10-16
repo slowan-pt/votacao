@@ -40,52 +40,44 @@ $online_count = count($usuarios_online);
 <meta charset="UTF-8">
 <title>Departamentos</title>
 <style>
-body{font-family:Arial; max-width:700px; margin:30px auto;}
-table{width:100%; border-collapse:collapse;}
-th,td{border:1px solid #ccc; padding:8px; text-align:left;}
-th{background:#f0f0f0;}
-button{padding:5px 10px;}
-.online{margin-bottom:15px; font-weight:bold;}
-.logout{float:right;}
-.loading-banner{
-    display:flex;
-    align-items:center;
-    background:#f0f8ff;
-    border:1px solid #ccc;
-    padding:10px;
-    margin-bottom:10px;
-    font-weight:bold;
-}
-.spinner{
-    border:4px solid #f3f3f3;
-    border-top:4px solid #3498db;
-    border-radius:50%;
-    width:20px;
-    height:20px;
-    animation: spin 1s linear infinite;
-    margin-right:10px;
-}
-@keyframes spin{
-    0%{transform:rotate(0deg);}
-    100%{transform:rotate(360deg);}
-}
+    body{font-family:Arial; max-width:800px;margin:30px auto;}
+    table{width:100%; border-collapse:collapse;margin-top:20px;text-align:left;}
+    th,td{border:1px solid #ccc;padding:10px;text-align:left;}
+    th{background:#f0f0f0;font-weight:bold;}
+    button{padding:8px 12px;margin:5px 0;cursor:pointer;}
+    .logout{float:right;margin-top:-30px;}
+    .online{font-size:0.9em;color:#555;margin-bottom:20px;}
+    .loading-banner{background:#fff3cd;color:#856404;padding:15px;text-align:center;border-radius:5px;margin-top:20px;display:flex;align-items:center;justify-content:center;}
+    .spinner{border:4px solid rgba(0,0,0,.1);border-left-color:#856404;border-radius:50%;width:20px;height:20px;animation:spin 1s linear infinite;margin-right:10px;}
+    @keyframes spin{to{transform:rotate(360deg);}}
 </style>
+
 <script>
-// Função para verificar se admin iniciou a votação
 function checarVotacao(){
     fetch('verifica_votacao.php')
-        .then(resp => resp.json())
+        .then(response => response.json())
         .then(data => {
-            if(data.votacao_id){ 
-                // Redireciona para votacao.php (indicação) ou votacao_lider.php (desempate)
-                if (data.status === 3) {
-                    window.location.href='votacao_lider.php?id=' + data.votacao_id;
-                } else {
-                    window.location.href='votacao.php?id=' + data.votacao_id;
+            // Se houver uma votação ativa (votacao_id não é nulo)
+            if(data.votacao_id){
+                let pagina = '';
+                
+                // Status 1: Indicação. Redireciona para votacao.php
+                if(data.status == 1){ 
+                    pagina = 'votacao.php'; 
+                } 
+                // Status 3: Votação de Líder/Desempate. Redireciona para votacao_lider.php
+                else if (data.status == 3){ 
+                    pagina = 'votacao_lider.php'; 
+                }
+
+                if(pagina){
+                    window.location.href = pagina + '?id=' + data.votacao_id;
                 }
             }
+            // Se votacao_id for null, o usuário permanece na tela de departamentos.
         });
 }
+
 <?php if(!$isAdmin): ?>
 // Usuários normais checam a cada 2s
 setInterval(checarVotacao,2000);
@@ -128,6 +120,7 @@ setInterval(checarVotacao,2000);
     </td>
     <td>
         <?php 
+        // Lógica para o botão "Continuar Desempate"
         $candidatos_desempate_ids = json_decode($d['candidatos_desempate_json']??'[]', true)??[];
         $aguardando_desempate = empty($d['lider_escolhido_2026']) && $isAdmin && !empty($candidatos_desempate_ids) && $d['status_votacao'] == 0;
         
@@ -136,12 +129,16 @@ setInterval(checarVotacao,2000);
             <a href="iniciar_votacao.php?id=<?php echo $d['id']; ?>&desempate=1">
                 <button>Continuar Desempate</button>
             </a>
-        <?php elseif(empty($d['lider_escolhido_2026']) && $isAdmin): // Opção 2: Iniciar votação normal ?>
+        <?php elseif(empty($d['lider_escolhido_2026']) && $isAdmin): // Opção 2: Iniciar Indicação/Votação
+        ?>
             <a href="iniciar_votacao.php?id=<?php echo $d['id']; ?>">
                 <button>Iniciar votação</button>
             </a>
-        <?php else: // Opção 3: Desabilitado ou já finalizado ?>
-            <button disabled>Iniciar votação</button>
+        <?php elseif($d['status_votacao'] == 1 || $d['status_votacao'] == 3): // Opção 3: Ver resultado (enquanto votação está ativa)
+        ?>
+            <a href="resultado_lider.php?id=<?php echo $d['id']; ?>">
+                <button>Ver Resultados</button>
+            </a>
         <?php endif; ?>
     </td>
 </tr>

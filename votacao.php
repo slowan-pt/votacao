@@ -57,7 +57,11 @@ if(isset($_POST['indicar'])){
     $novos = $_POST['indicados'] ?? [];
     // garantir que sejam inteiros e únicos
     $novos_sanitizados = array_values(array_unique(array_map('intval', $novos)));
-    $json = json_encode($novos_sanitizados);
+
+    // --- CORREÇÃO: MESCLAR indicações novas com as indicações existentes ---
+    $indicados_atuais = array_unique(array_merge($indicados_ids, $novos_sanitizados));
+    $json = json_encode(array_values($indicados_atuais));
+    // ----------------------------------------------------------------------
 
     // registrar voto do usuário atual caso ainda não registrado
     if(!in_array($user_id, $votos, true)) $votos[] = $user_id;
@@ -68,7 +72,7 @@ if(isset($_POST['indicar'])){
     $stmt->execute();
 
     // atualizar variáveis em execução
-    $indicados_ids = $novos_sanitizados;
+    $indicados_ids = $indicados_atuais;
     $votos = array_map('intval', json_decode($votos_json_to_save, true));
     $bloquear = true; // bloquear inputs para este usuário (frontend)
 }
@@ -186,7 +190,6 @@ window.onload = function(){
 <h2><?php echo htmlspecialchars($departamento['nome']); ?> - Indicar Candidatos</h2>
 <p>Bem-vindo, <?php echo htmlspecialchars($_SESSION['usuario_nome']); ?> | <a href="departamentos.php">Voltar</a></p>
 
-<!-- Colunas topo -->
 <div class="colunas">
     <div class="coluna">
         <h4>Já votaram (<?php echo $quantos_votaram; ?>)</h4>
@@ -202,12 +205,11 @@ window.onload = function(){
     </div>
 </div>
 
-<!-- Busca -->
 <input type="text" id="busca" placeholder="Buscar membro..." onkeyup="filtrarMembros()">
 
-<!-- Lista de checkboxes -->
 <form method="POST" id="listaCheck">
     <?php foreach($listaUsuariosAll as $u):
+        // Verifica se o usuário atual indicou este candidato ou se ele já foi indicado antes
         $checked = in_array($u['id'],$indicados_ids) ? 'checked' : '';
     ?>
     <label>
@@ -222,7 +224,6 @@ window.onload = function(){
     <button type="submit" name="nenhum">Prefiro não indicar ninguém</button>
 </form>
 
-<!-- Modal -->
 <div class="modal" id="modal">
     <div class="modal-content">
         <h3>Votação em andamento</h3>

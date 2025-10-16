@@ -15,31 +15,32 @@ if(!$departamento) die("Departamento não encontrado.");
 $isAdmin = ($_SESSION['usuario_tipo'] ?? '') === 'admin';
 
 // REDIRECIONAMENTO AUTOMÁTICO PARA USUÁRIOS COMUNS APÓS AÇÃO DO ADMIN
-// Se o status for 0 e ainda não tiver líder, significa que a votação foi pausada (desempate depois) ou não iniciada.
 if ($departamento['status_votacao'] == 0 && empty($departamento['lider_escolhido_2026'])) {
     if (!$isAdmin) {
         header("Location: departamentos.php"); exit;
     }
 }
 
+// --- DETERMINAÇÃO DAS VARIÁVEIS DE VOTAÇÃO ---
+$campo_votos_db = 'votos_lider_json'; // Padrão: Votação Inicial
+$campo_candidatos_db = 'indicados'; // Coluna onde os IDs dos candidatos estão
+$titulo_votacao = "Votação de Líder";
 
-// Determina qual lista de candidatos usar (indicados iniciais ou empatados)
 if ($departamento['status_votacao'] == 3) {
-    // Votação de Desempate: usa candidatos_desempate_json
-    $candidatos_ids = json_decode($departamento['candidatos_desempate_json'], true) ?? [];
+    // Votação de Desempate: usa nova coluna de votos
+    $campo_votos_db = 'votos_desempate_json'; 
+    $campo_candidatos_db = 'candidatos_desempate_json';
     $titulo_votacao = "Desempate de Líder";
-} else {
-    // Votação de Líder Inicial (Status 2, ou padrão): usa indicados
-    $candidatos_ids = json_decode($departamento['indicados'], true) ?? [];
-    $titulo_votacao = "Votação de Líder";
 }
+// ---------------------------------------------
 
-$votos_lider = json_decode($departamento['votos_lider_json']??'[]',true)??[];
+$candidatos_ids = json_decode($departamento[$campo_candidatos_db] ?? '[]', true) ?? []; 
+$votos_atuais = json_decode($departamento[$campo_votos_db] ?? '[]', true) ?? [];
 $user_id = $_SESSION['usuario_id'];
 
-// Verifica se o usuário já votou
+// Verifica se o usuário já votou nesta rodada (usando a coluna CORRETA)
 $ja_votou = false;
-foreach($votos_lider as $v){
+foreach($votos_atuais as $v){
     if($v['usuario_id'] == $user_id){
         $ja_votou = true;
         break;
@@ -53,11 +54,21 @@ if($ja_votou) {
 if(isset($_POST['votar'])){
     $escolha = intval($_POST['lider'] ?? 0);
     if($escolha>0){
+        // A lógica de votos e contagem precisa ser atualizada
         $votos_contagem = json_decode($departamento['votos_contagem'] ?? '{}', true);
-        $votos_lider[] = ["usuario_id"=>$user_id,"votou_em"=>$escolha];
+        
+        // Adiciona voto à lista de votos da rodada atual
+        $votos_atuais[] = ["usuario_id"=>$user_id,"votou_em"=>$escolha];
+        
+        // Incrementa contagem (votos_contagem sempre reflete a contagem ATUAL)
         $votos_contagem[$escolha] = ($votos_contagem[$escolha] ?? 0)+1;
-        $stmt = $conn->prepare("UPDATE departamentos SET votos_lider_json=?, votos_contagem=? WHERE id=? ");
-        $stmt->bind_param("ssi", json_encode($votos_lider), json_encode($votos_contagem), $dep_id);
+        
+        // Salva o voto no campo correto ($campo_votos_db) e atualiza contagem
+        // O nome da coluna $campo_votos_db é inserido diretamente na query
+        $stmt_sql = "UPDATE departamentos SET {$campo_votos_db}=?, votos_contagem=? WHERE id=?";
+        $stmt = $conn->prepare($stmt_sql);
+        
+        $stmt->bind_param("ssi", json_encode($votos_atuais), json_encode($votos_contagem), $dep_id);
         $stmt->execute();
     }
     header("Location: resultado_lider.php?id=$dep_id"); exit;
@@ -65,7 +76,6 @@ if(isset($_POST['votar'])){
 
 $indicados = [];
 if(count($candidatos_ids)>0){
-    // ATENÇÃO: Risco de SQL Injection aqui. Uso de prepared statements seria melhor.
     $ids_str = implode(',',$candidatos_ids);
     $res = $conn->query("SELECT id,nome FROM usuarios WHERE id IN ($ids_str) ORDER BY nome");
     while($row = $res->fetch_assoc()) $indicados[$row['id']]=$row['nome'];
