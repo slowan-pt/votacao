@@ -14,12 +14,24 @@ if(!$departamento) die("Departamento não encontrado.");
 
 $isAdmin = ($_SESSION['usuario_tipo'] ?? '') === 'admin';
 
-// REDIRECIONAMENTO AUTOMÁTICO PARA USUÁRIOS COMUNS APÓS AÇÃO DO ADMIN
-if ($departamento['status_votacao'] == 0 && empty($departamento['lider_escolhido_2026'])) {
-    if (!$isAdmin) {
-        header("Location: departamentos.php"); exit;
+// =========================================================================
+// CORREÇÃO: REDIRECIONAMENTO AUTOMÁTICO PARA USUÁRIOS COMUNS
+// =========================================================================
+if (!$isAdmin) {
+    // 1. Se a Votação de Desempate (status=3) foi iniciada, redireciona o usuário comum para VOTAR.
+    if ($departamento['status_votacao'] == 3) {
+        header("Location: votacao_lider.php?id=$dep_id"); 
+        exit;
+    }
+    
+    // 2. Se a votação foi finalizada (status=0) e ainda não tem líder (admin pausou o desempate), volta para a lista.
+    if ($departamento['status_votacao'] == 0 && empty($departamento['lider_escolhido_2026'])) {
+        header("Location: departamentos.php"); 
+        exit;
     }
 }
+// =========================================================================
+
 
 // Apenas o Admin pode enviar POST para finalizar/desempate
 if ($isAdmin) {
@@ -140,24 +152,25 @@ if ($isAdmin) {
                 // 2. Gerar título e botões de ação (Apenas para Admin)
                 if (isAdmin) {
                     let htmlBotoes = '<form method="POST">';
+                    let tituloResultado = '<h3>Resultado Parcial</h3>';
 
                     if (data.isEmpate) {
-                        htmlBotoes += '<h3>Resultado: Empate!</h3>';
+                        tituloResultado = '<h3>Resultado: Empate!</h3>';
                         // Adicionar candidatos empatados para envio no POST
                         htmlBotoes += `<input type="hidden" name="empatados_json" value='${JSON.stringify(data.empatados)}'>`;
                         htmlBotoes += '<button type="submit" name="desempate_agora">Votação de Desempate</button>';
                         htmlBotoes += '<button type="submit" name="desempate_depois">Fazer desempate depois</button>';
                     } else if (data.lider_id) {
-                        htmlBotoes += `<h3>Líder Vencedor: ${data.indicados.find(i => i.id === data.lider_id).nome}</h3>`;
+                        tituloResultado = `<h3>Líder Vencedor: ${data.indicados.find(i => i.id === data.lider_id).nome}</h3>`;
                         htmlBotoes += `<input type="hidden" name="lider_id_vencedor" value="${data.lider_id}">`;
                         htmlBotoes += '<button type="submit" name="finalizar">Finalizar Votação</button>';
                     }
-
-                    htmlBotoes += '</form>';
+                    
+                    htmlBotoes = tituloResultado + htmlBotoes + '</form>';
                     acoesAdminDiv.innerHTML = htmlBotoes;
                 } else if (!isAdmin && data.isEmpate) {
-                    // Mensagem para o usuário comum em caso de empate
-                    acoesAdminDiv.innerHTML = '<p>Houve um empate. Aguarde o administrador iniciar a votação de desempate.</p>';
+                    // Mensagem para o usuário comum em caso de empate (se o admin não agiu)
+                    acoesAdminDiv.innerHTML = '<p>Houve um empate. Aguarde o administrador finalizar a rodada ou iniciar o desempate.</p>';
                 }
             })
             .catch(error => {
@@ -168,7 +181,8 @@ if ($isAdmin) {
 
     // Inicia a atualização e configura para repetir a cada 2s para acompanhar a votação/ação do admin
     buscarResultados();
-    setInterval(buscarResultados, 2000);
+    // Manter o refresh para atualizar a tela caso o admin finalize ou o status mude (mesmo com o PHP redirect)
+    setInterval(buscarResultados, 2000); 
 </script>
 </body>
 </html>
