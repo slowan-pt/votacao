@@ -77,7 +77,7 @@ if(count($candidatos_ids)>0){
     <meta charset="UTF-8">
     <title><?php echo $titulo_votacao; ?></title>
     <style>
-        /* Estilos para Layout */
+        /* Estilos para Layout sx*/
         body{font-family:Arial; max-width:600px;margin:30px auto;text-align:center;}
         label{display:inline-block; margin:5px 15px;text-align:left;}
         button{margin:15px;padding:8px 12px;}
