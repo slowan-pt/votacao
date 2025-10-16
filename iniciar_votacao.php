@@ -6,21 +6,27 @@ $dep_id = intval($_GET['id'] ?? 0);
 $isDesempate = isset($_GET['desempate']);
 
 if ($isDesempate) {
-    // Modo Desempate (status_votacao=3)
-    $status = 3;
-    // Redireciona direto para a votação de líder/desempate
-    $redirect_url = "votacao_lider.php?id=$dep_id"; 
+    // MODO DESEMPATE (acionado por "Continuar Desempate")
+    
+    // CORREÇÃO: Define status_votacao=3 E ZERA os votos e contagens (votos_lider_json e votos_contagem)
+    $stmt = $conn->prepare("UPDATE departamentos SET status_votacao=3, votos_lider_json='[]', votos_contagem='{}' WHERE id=?");
+    $stmt->bind_param("i", $dep_id);
+    $stmt->execute();
+
+    // Redireciona para a tela de votação do líder/desempate
+    header("Location: votacao_lider.php?id=$dep_id");
+    
 } else {
-    // Modo Votação Inicial (status_votacao=1)
-    $status = 1;
-    // Votação inicial começa pela indicação
-    $redirect_url = "votacao.php?id=$dep_id"; 
+    // MODO VOTAÇÃO INICIAL (acionado por "Iniciar votação")
+    
+    // Define status_votacao=1 (Indicação)
+    $stmt = $conn->prepare("UPDATE departamentos SET status_votacao=1 WHERE id=?");
+    $stmt->bind_param("i", $dep_id);
+    $stmt->execute();
+
+    // Redireciona para a tela de indicação
+    header("Location: votacao.php?id=$dep_id"); 
 }
 
-// Atualiza o status de votação no banco de dados
-$stmt = $conn->prepare("UPDATE departamentos SET status_votacao=? WHERE id=?");
-$stmt->bind_param("ii", $status, $dep_id);
-$stmt->execute();
-header("Location: $redirect_url");
 exit;
 ?>
